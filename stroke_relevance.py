@@ -74,7 +74,7 @@ def interpret(image, texts, model, device, start_layer=start_layer, start_layer_
     return text_relevance, image_relevance
 
 
-def calculate_stroke_importance(svg_path, prompt):
+def calculate_stroke_importance(svg_path, prompt, add_stroke = False):
   svg_path = Path(svg_path)
   file_name = svg_path.stem
   _,paths = svg2paths(svg_path)
@@ -115,8 +115,11 @@ def calculate_stroke_importance(svg_path, prompt):
   image_relevance = torch.nn.functional.interpolate(image_relevance, size=224, mode='bilinear')
   image_relevance = image_relevance.reshape(224, 224).cuda().data.cpu().numpy()
   image_relevance = (image_relevance - image_relevance.min()) / (image_relevance.max() - image_relevance.min())
-
   
+
+  if add_stroke:
+    return image_relevance
+
   
   shapes = []
   shape_groups = []

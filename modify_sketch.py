@@ -11,11 +11,16 @@ import torch
 import skimage
 import skimage.io
 import random
+import numpy as np
 import ttools.modules
 import argparse
 import math
 from svgpathtools import svg2paths
+from scipy.special import softmax
 import stroke_relevance
+from matplotlib import pyplot as plt
+from sys import exit
+import diffvg
 
 pydiffvg.set_print_timing(False)
 
@@ -28,11 +33,11 @@ gamma = 1.0
 
 #args = parser.parse_args()
 
-path = '/home/ubuntu/scratch/twptids/original_sketches/camel.svg'
-prompt = 'camel on fire'
+PATH = 'original_sketches/camel.svg'
+prompt = 'add fire on camel'
 
 folder_path = 'images/' + prompt
-os.mkdir(folder_path)
+os.makedirs(folder_path, exist_ok=True)
 
 #initialize clip
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -48,7 +53,7 @@ device = torch.device('cuda')
 pydiffvg.set_device(device)
 
 # Optimization arguments
-num_iter = 1000
+num_iter = 100
 canvas_width, canvas_height = 224,224
 
 # encode the text prompt
@@ -71,15 +76,64 @@ if use_normalized_clip:
 # initialize strokes
 shapes = []
 shape_groups = []
-_,svg_paths = svg2paths(path)
-for svg_path in svg_paths:
-  svg_path = pydiffvg.from_svg_path(svg_path['d'])
-  svg_path = svg_path[0]
-  svg_path.stroke_width =  torch.tensor(1.0)
-  shapes.append(svg_path)
-  path_group = pydiffvg.ShapeGroup(shape_ids = torch.tensor([len(shapes) - 1]), fill_color = None, stroke_color = torch.tensor([0.0, 0.0, 0.0, 1.0]))
-  shape_groups.append(path_group)
+num_paths = 4
+if prompt.split()[0] == 'add':
+  
+  image_relevance = stroke_relevance.calculate_stroke_importance(PATH,prompt, add_stroke = True)
+  image_relevance_soft = np.copy(image_relevance)
+  image_relevance_soft[image_relevance > 0] = softmax(image_relevance[image_relevance>0])
+  
+  
+  plt.imshow(image_relevance)
+  flat = image_relevance_soft.flatten()
+  
 
+# Then, sample an index from the 1D array with the
+# probability distribution from the original array
+  print(sum(flat))
+  sample_index = np.random.choice(a=flat.size, p=flat, size = num_paths)
+
+# Take this index and adjust it so it matches the original array
+  adjusted_index = np.unravel_index(sample_index, image_relevance.shape)
+  coords = list(zip(adjusted_index[0], adjusted_index[1]))
+  
+  for coord in coords:
+    x,y = coord
+    coord = x/canvas_width , y/canvas_height
+    num_segments = random.randint(1, 3)
+    num_control_points = torch.zeros(num_segments, dtype = torch.int32) + 2
+    points = []
+    p0 = coord
+    points.append(p0)
+    for j in range(num_segments):
+        radius = 0.1
+        p1 = (p0[0] + radius * (random.random() - 0.5), p0[1] + radius * (random.random() - 0.5))
+        p2 = (p1[0] + radius * (random.random() - 0.5), p1[1] + radius * (random.random() - 0.5))
+        p3 = (p2[0] + radius * (random.random() - 0.5), p2[1] + radius * (random.random() - 0.5))
+        points.append(p1)
+        points.append(p2)
+        points.append(p3)
+        p0 = coord
+    points = torch.tensor(points)
+    points[:, 0] *= canvas_width
+    points[:, 1] *= canvas_height
+    print(p0)
+    print(points)
+    path = pydiffvg.Path(num_control_points = num_control_points, points = points, stroke_width = torch.tensor(1.0), is_closed = False)
+    shapes.append(path)
+    path_group = pydiffvg.ShapeGroup(shape_ids = torch.tensor([len(shapes) - 1]), fill_color = None, stroke_color =  torch.tensor([0.0, 0.0, 0.0, 1.0]))
+    shape_groups.append(path_group)
+
+  _,svg_paths = svg2paths(PATH)
+  for svg_path in svg_paths:
+    svg_path = pydiffvg.from_svg_path(svg_path['d'])
+    svg_path = svg_path[0]
+    svg_path.stroke_width =  torch.tensor(1.0)
+    shapes.append(svg_path)
+    path_group = pydiffvg.ShapeGroup(shape_ids = torch.tensor([len(shapes) - 1]), fill_color = None, stroke_color = torch.tensor([0.0, 0.0, 0.0, 1.0]))
+    shape_groups.append(path_group)
+
+print(shape_groups)
 
 # Just some diffvg setup
 scene_args = pydiffvg.RenderFunction.serialize_scene(\
@@ -93,11 +147,21 @@ for path in shapes:
 
 params = []
 
-relevances = stroke_relevance.calculate_stroke_importance(path,prompt)
+relevances = stroke_relevance.calculate_stroke_importance(PATH,prompt)
 
 for i, point_var in enumerate(points_vars):
+  add_stroke = True
+  if add_stroke:
+    if i < num_paths:
+      param = {'params': point_var, 'lr': 1}
+    else:
+      param = {'params': point_var, 'lr': 0}
+  
+  elif relevances[i] <= 0.7:
+    param ={'params': point_var, 'lr': 0}
+  else:
     param ={'params': point_var, 'lr': relevances[i]}
-    params.append(param)
+  params.append(param)
 
 
 

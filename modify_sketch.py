@@ -16,7 +16,7 @@ import ttools.modules
 import argparse
 import math
 from svgpathtools import svg2paths
-from scipy.special import softmax
+from scipy.special import expit
 import stroke_relevance
 from matplotlib import pyplot as plt
 from sys import exit
@@ -80,25 +80,14 @@ num_paths = 4
 if prompt.split()[0] == 'add':
   
   image_relevance = stroke_relevance.calculate_stroke_importance(PATH,prompt, add_stroke = True)
-  image_relevance_soft = np.copy(image_relevance)
-  image_relevance_soft[image_relevance > 0] = softmax(image_relevance[image_relevance>0])
   
-  
-  plt.imshow(image_relevance)
-  flat = image_relevance_soft.flatten()
-  
+  area = list(zip(*np.where(image_relevance>0.1)))
 
-# Then, sample an index from the 1D array with the
-# probability distribution from the original array
-  print(sum(flat))
-  sample_index = np.random.choice(a=flat.size, p=flat, size = num_paths)
-
-# Take this index and adjust it so it matches the original array
-  adjusted_index = np.unravel_index(sample_index, image_relevance.shape)
-  coords = list(zip(adjusted_index[0], adjusted_index[1]))
   
-  for coord in coords:
-    x,y = coord
+  
+  
+  for i in range(4):
+    x,y = random.choice(area)
     coord = x/canvas_width , y/canvas_height
     num_segments = random.randint(1, 3)
     num_control_points = torch.zeros(num_segments, dtype = torch.int32) + 2
@@ -107,22 +96,25 @@ if prompt.split()[0] == 'add':
     points.append(p0)
     for j in range(num_segments):
         radius = 0.1
-        p1 = (p0[0] + radius * (random.random() - 0.5), p0[1] + radius * (random.random() - 0.5))
-        p2 = (p1[0] + radius * (random.random() - 0.5), p1[1] + radius * (random.random() - 0.5))
-        p3 = (p2[0] + radius * (random.random() - 0.5), p2[1] + radius * (random.random() - 0.5))
+        p1 = tuple(x/224 for x in random.choice(area))
+        p2 = tuple(x/224 for x in random.choice(area))
+        p3 = tuple(x/224 for x in random.choice(area))
         points.append(p1)
         points.append(p2)
         points.append(p3)
-        p0 = coord
+        p0 = p3
     points = torch.tensor(points)
     points[:, 0] *= canvas_width
     points[:, 1] *= canvas_height
-    print(p0)
-    print(points)
     path = pydiffvg.Path(num_control_points = num_control_points, points = points, stroke_width = torch.tensor(1.0), is_closed = False)
     shapes.append(path)
     path_group = pydiffvg.ShapeGroup(shape_ids = torch.tensor([len(shapes) - 1]), fill_color = None, stroke_color =  torch.tensor([0.0, 0.0, 0.0, 1.0]))
     shape_groups.append(path_group)
+    print(points)
+    print(num_segments)
+    print(num_control_points)
+
+  print(points)
 
   _,svg_paths = svg2paths(PATH)
   for svg_path in svg_paths:
@@ -173,12 +165,7 @@ points_optim = torch.optim.Adam(params)
 for t in range(num_iter):
 
     # Anneal learning rate (makes videos look cleaner)
-    if t == int(num_iter * 0.5):
-        for g in points_optim.param_groups:
-            g['lr'] = 0.4
-    if t == int(num_iter * 0.75):
-        for g in points_optim.param_groups:
-            g['lr'] = 0.1
+
     
     points_optim.zero_grad()
    

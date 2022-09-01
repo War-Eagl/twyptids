@@ -82,6 +82,7 @@ if prompt.split()[0] == 'add':
   image_relevance = stroke_relevance.calculate_stroke_importance(PATH,prompt, add_stroke = True)
   
   area = list(zip(*np.where(image_relevance>0.1)))
+  area = [(float(x/canvas_width) , float(y/canvas_height)) for x,y in area]
 
   
   
